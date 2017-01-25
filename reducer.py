@@ -8,6 +8,7 @@ current_count = 0
 current_subreddit = None
 author = None
 subreddit = None
+commentlist = []
 
 # input comes from STDIN
 for line in sys.stdin:
@@ -15,7 +16,7 @@ for line in sys.stdin:
     line = line.strip()
 
     # parse the input we got from mapper.py
-    author,subreddit,count = line.split('\t')
+    author,subreddit,count = line.split(',')
 
     # convert count (currently a string) to int
     try:
@@ -31,18 +32,22 @@ for line in sys.stdin:
         if current_subreddit == subreddit:
             current_count += count
         else:
-            print '%s\t%s\t%s' % (current_author, current_subreddit,current_count)
+	    commentlist.append((current_subreddit,str(current_count)))
+#            print '%s\t%s\t%s' % (current_author, current_subreddit,current_count)
             current_subreddit=subreddit
             current_count=count
     else:
         if current_author:
             if current_subreddit:
+                commentlist.append((current_subreddit,str(current_count)))
             # write result to STDOUT
-                print '%s\t%s\t%s' % (current_author, current_subreddit,current_count)
+                print current_author + " [ "+', '.join('{}={}'.format(*e1) for e1 in commentlist) + " ]"
         current_count = count
         current_author = author
         current_subreddit = subreddit
+	commentlist=[]
 # do not forget to output the last word if needed!
 if current_author == author:
-    print '%s\t%s\t%s' % (current_author, current_subreddit,current_count)
-
+    commentlist.append((current_subreddit,str(current_count)))
+    print current_author + " [ " +', '.join('{}={}'.format(*e1) for e1 in commentlist)+" ]"
+#    print '%s\t%s\t%s' % (current_author, current_subreddit,current_count)
