@@ -24,9 +24,11 @@ from operator import add
 from pyspark import SparkContext,SparkConf
 from pyspark.sql import SparkSession,SQLContext,Row
 from pyspark.sql.types import *
-from itertools import chain
+#from itertools import chain
 #from pyspark.sql.functions import split,explode
 from pyspark.ml.feature import PCA
+#import numpy
+#from sklearn.decomposition import PCA
 from pyspark.ml.linalg import Vectors, VectorUDT
 
 
@@ -35,12 +37,13 @@ def record_to_row(record):
     return Row(**schema)
 
 def make_vector(record,sublist):
-    ret=[]    
+    feat=[]
     for sub in sublist:
         if sub in record[1]:
-            ret.append(record[1][record[1].index(sub)+1])
+            feat.append(int(record[1][record[1].index(sub)+1]))
         else:
-            ret.append(0)          
+            feat.append(0)
+    ret=Row(author=record[0],features=Vectors.dense(feat))
     return ret
 if __name__ == "__main__":
     if len(sys.argv) != 2:
@@ -69,7 +72,7 @@ if __name__ == "__main__":
 #    topwordscount = words.groupBy('word').count().orderBy('count',ascending=False)
 #    print (topwordscount.show())
 #    print (topwordscount.count())
-    allsubs=lines.select("subreddit").groupBy('subreddit').rdd.flatMap(lambda x: x).collect()
+    allsubs=lines.select("subreddit").groupBy('subreddit').count()
     sublist=allsubs.select("subreddit").rdd.flatMap(lambda x: x).collect()
     broadcastSubs=spark.sparkContext.broadcast(sublist)    
 #    fields=[StructField("name",StringType(),True)] + [StructField(field_name,In$
@@ -88,11 +91,25 @@ if __name__ == "__main__":
 #    print (authorcount)
     posthistory=lines.select("author","subreddit").groupBy('author','subreddit').count().orderBy('count',ascending=False)
     postrdd=posthistory.rdd.map(lambda (x,y,z): (x,[y,z])).reduceByKey(lambda p,q: p+q)
-    print (postrdd.take(2))
-    datavector=postrdd.map(lambda x:make_vector(x,sublist))
-    print (datavector.take(2))
-    df = spark.createDataFrame(datavector,["features"])
+#    print (postrdd.take(2))
+    data=postrdd.map(lambda x:make_vector(x,sublist))
+    print (data.take(2))
+#    schema = StructType([
+#        StructField("label", StringType(), True),
+#        StructField("features", VectorUDT(), True)
+#    ])    
+#    datavector=data[0],pyspark.ml.linalg.DenseVector(data[1])
+#    df = datavector.toDF(schema).printSchema()
+    df = spark.createDataFrame(data)
+    df.printSchema()
+#    pcastuff=df.select("features").collect()
+#    print (pcastuff)
+#    model=PCA.fit(pcastuff)
     model = PCA(k=10,inputCol="features",outputCol="pcaFeatures").fit(df)
+    result=model.transform(df).select("pcaFeatures")
+    print (model.explainedVariance)
+    print (model.pc)
+    result.show(truncate=False)
 #    row_rdd=posthistory.rdd.map(tuple)
 #    row_rdd=row_rdd.map(lambda x:record_to_row(x))
 #    schema_my_rdd=spark.createDataFrame(row_rdd,schema)
