@@ -27,12 +27,14 @@ from pyspark.sql.types import *
 #from pyspark.ml.feature import PCA
 import numpy
 from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
 from pyspark.ml.linalg import Vectors, VectorUDT
 from pyspark.ml.feature import Normalizer
 from pyspark.sql.functions import udf
 from datetime import datetime
 from datetime import timedelta, date
-
+#from pyspark.ml.clustering import KMeans
+import redis
 
 #def record_to_row(record):
 #    schema = record[0],{record[1]:record[2]}
@@ -64,11 +66,10 @@ if __name__ == "__main__":
         .config("spark.executor.memory","10g")\
         .getOrCreate()
 
-
+    r=redis.StrictRedis(host='172.31.1.69',port=6379)
 
     """read in a month of reddit comment data and remove posts by [deleted]
     keep only four fields, convert unix time to day"""
-#    spark.conf.set("spark.executor.memory","10g")    
     lines = spark.read.json(sys.argv[1])
     lines = lines.filter(lines["author"] != "[deleted]")
     lines = lines.select("author","subreddit","body","created_utc")
@@ -107,53 +108,25 @@ if __name__ == "__main__":
         """normalize our features to prepare for PCA"""
         normalizer=Normalizer(inputCol="features",outputCol="normFeatures")
         NormData=normalizer.transform(df).select("normFeatures","subreddit")
-        NormData.printSchema()
         features=NormData.collect()
         ftdata=[]
         fttags=[]
         for row in features:
             ftdata.append(row['normFeatures'])
-            fttags.append(row['subreddit'])     
-        print(fttags)
+            fttags.append(row['subreddit'].encode('utf-8'))     
         featurearray=numpy.array(ftdata)
         k=int(numpy.sqrt(subcount))
         """fancy new Facebook random PCA"""
         sklearn_pca=PCA(k,copy=False,whiten=False,svd_solver='randomized',iterated_power=2)
         sklearn_pca.fit(featurearray)
-        print (featurearray)
-#        features=NormData.rdd
-#        features=features.map(lambda x: numpy.array(x[0]))
-#        print (features.take(5))
-#        model = PCA(k=int(numpy.sqrt(subcount)),inputCol="normFeatures",outputCol="pcaFeatures").fit(NormData)
-#        result=model.transform(NormData).select("pcaFeatures")
-#        print (model.explainedVariance)
-#        print (model.pc)
-#        result.show()
+        transformed = sklearn_pca.transform(featurearray)
+
+        kmeans = KMeans(n_clusters=k+1,n_jobs=-1)
+        transform2 = kmeans.fit_transform(transformed)
+        partitions= kmeans.fit_predict(transformed)
+        zip1=zip(partitions,transform2.tolist())
+        zipped=dict(zip(fttags,zip1))
+        r.set(today.isoformat(),zipped)
         today=today+timedelta(1)
 
-#    words = lines.select(explode(split(lines["body"]," ")).alias("word"))
-#    print ('Number of active subreddits this month: ' + str(subcount))
-#    header=topsubscount.rdd.map(lambda r: r.subreddit).collect()
-    
-    """now we group the authors by number of comments and sort, then limit
-    to the number required for the clustering algorithm"""
-
-#    topauthorcount=lines.select("author").groupBy('author').count().filter(count>1).orderBy('count',ascending=False)
-#    print ("Number of authors used for clustering: " + str(topauthorcount.count()))
-#    authorlist=topauthorcount.select("author").rdd.flatMap(lambda x:x).collect()
-
-    """the feature we want to cluster on is """
-
-#    posthistory=lines.select("subreddit","Date","Author").groupBy('subreddit',"Date","Author").count().orderBy('Date',ascending=False)
-#    subrdd=posthistory.rdd.map(lambda (w,x,y,z): ((w,x),[y,z])).reduceByKey(lambda p,q: p+q)
-#    subrdd.take(10)
-#    row_rdd=posthistory.rdd.map(tuple)
-#    row_rdd=row_rdd.map(lambda x:record_to_row(x))
-#    schema_my_rdd=spark.createDataFrame(row_rdd,schema)
-#    schema_my_rdd.show()
-#    indexer=StringIndexer(inputCol="subreddit",outputCol="SubredditIndex")
-#    indexedposts=indexer.fit(posthistory).transform(posthistory)
-#    indexer2=indexer=StringIndexer(inputCol="author",outputCol="AuthorIndex")
-#    indexedposts=indexer2.fit(indexedposts).transform(indexedposts)
-#    datardd=indexedposts.rdd
     spark.stop()
