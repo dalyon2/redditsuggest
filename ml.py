@@ -28,6 +28,7 @@ from pyspark.sql.types import *
 import numpy
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+from sklearn.metrics import  silhouette_samples, silhouette_score
 from pyspark.ml.linalg import Vectors, VectorUDT
 from pyspark.ml.feature import Normalizer
 from pyspark.sql.functions import udf
@@ -84,19 +85,20 @@ if __name__ == "__main__":
     today = date(yyyy,mm, 1)
     while today.month==mm:
         daylines=lines.filter(lines.Date==today)
+#        print ('number of posts today: ',daylines.count())
         """to decide how many PCA dimensions to keep we need to know how many
         active subreddits there are today"""
 
         allsubs=daylines.select("subreddit").groupBy('subreddit').count()
         subcount=allsubs.count()
-        print ('Number of active subreddits on ' +str(today) + " was " + str(subcount))
-
-        """the authors are our features for clustering subreddits"""
+        subdict=allsubs.rdd.collectAsMap()
+#        print ('Number of active subreddits on ' +str(today) + " was " + str(subcount))
+        """the authors are our features for clustering subreddits, only keeping authors with more than 4 posts"""
 
         topauthorcount=daylines.select("author").groupBy('author').count().orderBy('count',ascending=False)
-        topauthorcount=topauthorcount.filter(topauthorcount['count']>1)
+        topauthorcount=topauthorcount.filter(topauthorcount['count']>4)
         authorlist=topauthorcount.select("author").rdd.flatMap(lambda x:x).collect()
-        print ("Number of authors used for clustering: " + str(len(authorlist)) + " on date: " + str(today))
+#        print ("Number of authors used for clustering: " + str(len(authorlist)) + " on date: " + str(today))
 
         """combine posting history of each author into one line, then combine with author list to make feature vector"""
 
@@ -117,16 +119,24 @@ if __name__ == "__main__":
         featurearray=numpy.array(ftdata)
         k=int(numpy.sqrt(subcount))
         """fancy new Facebook random PCA"""
+
         sklearn_pca=PCA(k,copy=False,whiten=False,svd_solver='randomized',iterated_power=2)
         sklearn_pca.fit(featurearray)
-        transformed = sklearn_pca.transform(featurearray)
-
-        kmeans = KMeans(n_clusters=k+1,n_jobs=-1)
-        transform2 = kmeans.fit_transform(transformed)
-        partitions= kmeans.fit_predict(transformed)
-        zip1=zip(partitions,transform2.tolist())
-        zipped=dict(zip(fttags,zip1))
-        r.set(today.isoformat(),zipped)
+        dimreduced = sklearn_pca.transform(featurearray)
+#        print(sklearn_pca.explained_variance_)
+#        print(sklearn_pca.explained_variance_ratio_)
+        kmeans = KMeans(n_clusters=k,n_jobs=-1)
+        partitions=kmeans.fit_predict(dimreduced)
+        clusterspace = kmeans.fit_transform(dimreduced)
+        zip1=zip(partitions,clusterspace.tolist())
+        zip2=[]
+        for s in zip1:
+            zip2.append((s[0],s[1][s[0]]))
+        zipped=dict(zip(fttags,zip2))
+        output=[]
+        for tag in zipped:
+            output.append({'subreddit':tag,'cluster':zipped[tag][0],'clusterdist':zipped[tag][1],'subsize':subdict[tag]})
+        r.set(today.isoformat(),output)
+        print(today.isoformat() + " sent to Redis!")
         today=today+timedelta(1)
-
     spark.stop()
