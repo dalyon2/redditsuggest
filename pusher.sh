@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for year in 2010 2011 2012 2013 2014 2015
+for year in 2011 2012 2013 2014 2015
 
 do 
     spark-submit --master spark://172.31.1.72:7077 ml.py hdfs://172.31.1.72:9000/tmp/input/RC_${year}-01

@@ -85,16 +85,18 @@ if __name__ == "__main__":
     today = date(yyyy,mm, 1)
     while today.month==mm:
         daylines=lines.filter(lines.Date==today)
-#        print ('number of posts today: ',daylines.count())
+        print ('number of posts today: ',daylines.count())
         """to decide how many PCA dimensions to keep we need to know how many
         active subreddits there are today"""
 
-        allsubs=daylines.select("subreddit").groupBy('subreddit').count()
-        subcount=allsubs.count()
+        allsubs=daylines.select("subreddit").groupBy('subreddit').count().alias('subreddit_count')
+        subcountdf = daylines.join(allsubs,daylines['subreddit']==allsubs['subreddit'],'inner')
+        subcountdf=subcountdf.filter(subcountdf['count']>1)
+        topsubcount=subcountdf.count()
         subdict=allsubs.rdd.collectAsMap()
-#        print ('Number of active subreddits on ' +str(today) + " was " + str(subcount))
+        print ('Number of active subreddits on ' +str(today) + " was " + str(topsubcount))
         """the authors are our features for clustering subreddits, only keeping authors with more than 4 posts"""
-
+        break 
         topauthorcount=daylines.select("author").groupBy('author').count().orderBy('count',ascending=False)
         topauthorcount=topauthorcount.filter(topauthorcount['count']>4)
         authorlist=topauthorcount.select("author").rdd.flatMap(lambda x:x).collect()
@@ -102,7 +104,7 @@ if __name__ == "__main__":
 
         """combine posting history of each author into one line, then combine with author list to make feature vector"""
 
-        posthistory=daylines.select("subreddit","Author").groupBy('subreddit',"Author").count().orderBy('count',ascending=False)
+        posthistory=subcountdf.select("subreddit","Author").groupBy('subreddit',"Author").count().orderBy('count',ascending=False)
         subrdd=posthistory.rdd.map(lambda (x,y,z): (x,[y,z])).reduceByKey(lambda p,q: p+q)
         data=subrdd.map(lambda x:make_vector(x,authorlist))
         df = spark.createDataFrame(data)
@@ -117,7 +119,7 @@ if __name__ == "__main__":
             ftdata.append(row['normFeatures'])
             fttags.append(row['subreddit'].encode('utf-8'))     
         featurearray=numpy.array(ftdata)
-        k=int(numpy.sqrt(subcount))
+        k=int(numpy.sqrt(topsubcount))
         """fancy new Facebook random PCA"""
 
         sklearn_pca=PCA(k,copy=False,whiten=False,svd_solver='randomized',iterated_power=2)
