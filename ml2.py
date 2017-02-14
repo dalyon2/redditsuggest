@@ -28,7 +28,7 @@ from pyspark.sql.types import *
 import numpy
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
-#from sklearn.metrics import  silhouette_samples, silhouette_score
+from sklearn.metrics import  silhouette_samples, silhouette_score
 from pyspark.ml.linalg import Vectors, VectorUDT
 from pyspark.ml.feature import Normalizer,VectorAssembler
 from pyspark.sql.functions import udf
@@ -38,9 +38,6 @@ from datetime import timedelta, date
 import redis
 import time
 
-#def record_to_row(record):
-#    schema = record[0],{record[1]:record[2]}
-#    return Row(**schema)
 
 def make_vector(record,authorlist):
     """Take a record of how many times each author posted on a subreddit
@@ -98,10 +95,7 @@ OB    keep only four fields, convert unix time to day"""
     allsubs=allsubs.filter(allsubs['count']>900)
     topsubcount=allsubs.count()
     subcountdf = lines.join(allsubs,lines['subreddit']==allsubs['subreddit2'],'inner')
-#    subcountdf=subcountdf.filter(subcountdf['count']>900)
-#    topsubcount=subcountdf.groupBy('subreddit').count().count()
     subcountdf=subcountdf.drop('count').drop('subreddit2')
-#    allsubcount=allsubs.count()
     subdict=allsubs.rdd.collectAsMap()
     print ('On ' + sys.argv[1] + ' the number of active subreddits after filtering was: ' + str(topsubcount))
     """the authors are our features for clustering subreddits, only keeping authors with more than 5 posts"""
@@ -128,9 +122,6 @@ OB    keep only four fields, convert unix time to day"""
     for row in features:
         ftdata.append(row['normFeatures'])
         fttags.append(row['subreddit'].encode('utf-8'))     
-     
-
-
     featurearray=numpy.array(ftdata)
     numdims=int(numpy.sqrt(topsubcount))
     """spark distributed PCA"""
@@ -142,28 +133,18 @@ OB    keep only four fields, convert unix time to day"""
 
     sklearn_pca=PCA(n_components=numdims,copy=False,whiten=False,svd_solver='randomized',iterated_power=2)
     dimreduced = sklearn_pca.fit_transform(featurearray)
-#    dimreduced = sklearn_pca.transform(featurearray)
     t2=time.time()
     
 #    model = KMeans(featuresCol="pca_features",k=numdims).fit(dimreduced)
 #    transformed=model.transform(dimreduced).select("subreddit","prediction")
 #    rows=transformed.collect()
-#        print(sklearn_pca.explained_variance_)
-#        print(sklearn_pca.explained_variance_ratio_)
     kmeans = KMeans(n_clusters=numdims,n_jobs=-1)
     partitions=kmeans.fit_predict(dimreduced)
-#    clusterspace = kmeans.fit_transform(dimreduced)
     t3=time.time()
     print('Pre-PCA took ' + str(t1-t0) + ' PCA took ' + str(t2-t1) + ' and K-means took' + str(t3-t2))
 
-#    zip1=zip(partitions,clusterspace.tolist())
-#    zip2=[]
-#    for s in zip1:
-#        zip2.append((s[0],s[1][s[0]]))
     zipped=zip(fttags,partitions)
     output=[]
-#    for row in zipped:
-#        output.append({'subreddit':row['subreddit'],'cluster':row['prediction'],'subsize':subdict[row['subreddit']]})
     for row in zipped:
         output.append({'subreddit':row[0],'cluster':row[1],'subsize':subdict[row[0]]})
     r.set(sys.argv[1].replace('RC_',''),output)
